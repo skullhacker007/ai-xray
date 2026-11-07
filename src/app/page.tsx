@@ -92,7 +92,7 @@ export default function Home() {
   );
 
   // View state
-  const [primaryView, setPrimaryView] = useState<"ANALYSIS" | "GRAPH" | "WATERFALL" | "SPLIT">("ANALYSIS");
+  const [primaryView, setPrimaryView] = useState<"ANALYSIS" | "GRAPH" | "WATERFALL">("GRAPH");
   const [showInspector, setShowInspector] = useState(true);
   const [copiedAnswer, setCopiedAnswer] = useState(false);
 
@@ -124,6 +124,7 @@ export default function Home() {
   const [liveThroughput, setLiveThroughput] = useState<number | undefined>(undefined);
   const [liveTokensIn, setLiveTokensIn] = useState(tokenizeString(DEFAULT_PROMPT).length);
   const [liveTokensOut, setLiveTokensOut] = useState(0);
+  const [liveCachedTokens, setLiveCachedTokens] = useState(0);
   const [liveLogs, setLiveLogs] = useState<Array<{ time: string; level: "INFO" | "WARN" | "ERROR"; spanId?: string; message: string }>>([
     { time: "00:00:00", level: "INFO", message: "AI X-RAY Observatory ready for dynamic execution" },
   ]);
@@ -267,6 +268,7 @@ export default function Home() {
     setActiveToolExecutions([]);
     setActiveAgentBreakdown([]);
     setReplayStep(100);
+    setLiveCachedTokens(0);
 
     const initialTokensIn = tokenizeString(targetPrompt).length;
     setLiveTokensIn(initialTokensIn);
@@ -378,6 +380,9 @@ export default function Home() {
                 setLiveThroughput(event.tokens_per_second);
                 if (event.usage?.prompt_tokens) {
                   setLiveTokensIn(event.usage.prompt_tokens);
+                }
+                if (event.usage?.prompt_tokens_details?.cached_tokens !== undefined) {
+                  setLiveCachedTokens(event.usage.prompt_tokens_details.cached_tokens);
                 }
 
                 logEvent("INFO", `Completed generation: ${accumulatedTokens.length} tokens in ${event.total_duration_ms}ms (${event.tokens_per_second} tok/s)`);
@@ -771,6 +776,7 @@ export default function Home() {
     setLiveThroughput(rec.tokensPerSec);
     setLiveTokensIn(rec.tokensIn);
     setLiveTokensOut(rec.tokensOut);
+    setLiveCachedTokens(rec.cachedTokens || 0);
     setLiveLogs(rec.logs);
     setLiveCompareData(rec.compareData);
     setReplayStep(100);
@@ -978,16 +984,6 @@ export default function Home() {
             {/* Primary Investigation View Selector */}
             <div className="flex items-center rounded-lg border border-cyan-500/30 bg-[#081022] p-0.5 text-xs font-mono">
               <button
-                onClick={() => setPrimaryView("ANALYSIS")}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-bold transition cursor-pointer ${
-                  primaryView === "ANALYSIS"
-                    ? "bg-cyan-400 text-slate-950 shadow-[0_0_12px_rgba(34,211,238,0.3)]"
-                    : "text-slate-300 hover:text-cyan-300"
-                }`}
-              >
-                <span>🔬 Layer Analysis & Q&A</span>
-              </button>
-              <button
                 onClick={() => setPrimaryView("GRAPH")}
                 className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-bold transition cursor-pointer ${
                   primaryView === "GRAPH"
@@ -998,6 +994,16 @@ export default function Home() {
                 <span>🌐 Topology Graph</span>
               </button>
               <button
+                onClick={() => setPrimaryView("ANALYSIS")}
+                className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-bold transition cursor-pointer ${
+                  primaryView === "ANALYSIS"
+                    ? "bg-cyan-400 text-slate-950 shadow-[0_0_12px_rgba(34,211,238,0.3)]"
+                    : "text-slate-300 hover:text-cyan-300"
+                }`}
+              >
+                <span>🔬 Layer Analysis & Q&A</span>
+              </button>
+              <button
                 onClick={() => setPrimaryView("WATERFALL")}
                 className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-bold transition cursor-pointer ${
                   primaryView === "WATERFALL"
@@ -1006,16 +1012,6 @@ export default function Home() {
                 }`}
               >
                 <span>⏱️ Trace Waterfall</span>
-              </button>
-              <button
-                onClick={() => setPrimaryView("SPLIT")}
-                className={`flex items-center gap-1.5 rounded-md px-3 py-1 font-bold transition cursor-pointer ${
-                  primaryView === "SPLIT"
-                    ? "bg-cyan-400 text-slate-950 shadow-[0_0_12px_rgba(34,211,238,0.3)]"
-                    : "text-slate-300 hover:text-cyan-300"
-                }`}
-              >
-                <span>⚡ Split View</span>
               </button>
             </div>
           </div>
@@ -1243,8 +1239,8 @@ export default function Home() {
           </div>
 
           {/* VIEW MODE 1: COMPREHENSIVE LAYER ANALYSIS & Q&A WALKTHROUGH */}
-          {(primaryView === "ANALYSIS" || primaryView === "SPLIT") && (
-            <div className={`overflow-y-auto p-4 sm:p-6 space-y-6 ${primaryView === "SPLIT" ? "h-1/2 border-b border-white/[0.1]" : "flex-1"}`}>
+          {primaryView === "ANALYSIS" && (
+            <div className="overflow-y-auto p-4 sm:p-6 space-y-6 flex-1 min-h-0">
               {/* Question / Input Query Specification Card */}
               <div className="rounded-xl border border-cyan-500/30 bg-[#070e20] p-4 shadow-[0_0_20px_rgba(34,211,238,0.08)]">
                 <div className="flex flex-wrap items-center justify-between border-b border-white/[0.08] pb-2.5 mb-3 gap-2">
@@ -1316,7 +1312,9 @@ export default function Home() {
                       </span>
                       <h3 className="text-xs font-mono font-bold text-slate-100">Input Ingestion & Boundary Gateway</h3>
                     </div>
-                    <span className="text-[10px] font-mono text-emerald-400 font-bold">1ms • Completed</span>
+                    <span className="text-[10px] font-mono text-emerald-400 font-bold">
+                      {liveNodes.find((n) => n.id === "node-in")?.durationMs || 1}ms • Completed
+                    </span>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-[11px] font-mono text-slate-300 mt-2">
                     <div className="rounded border border-white/[0.06] bg-[#03060c] p-2">
@@ -1424,7 +1422,9 @@ export default function Home() {
                     </div>
                     <div className="rounded border border-white/[0.06] bg-[#03060c] p-2">
                       <span className="text-[9px] text-slate-500 block">PROMPT CACHE TOKENS</span>
-                      <strong className="text-slate-400">0 (Cold Run)</strong>
+                      <strong className={liveCachedTokens > 0 ? "text-emerald-300" : "text-slate-400"}>
+                        {liveCachedTokens} ({liveCachedTokens > 0 ? "Cache Hit" : "Cold Run"})
+                      </strong>
                     </div>
                     <div className="rounded border border-white/[0.06] bg-[#03060c] p-2">
                       <span className="text-[9px] text-slate-500 block">PROVENANCE ATTRIBUTION</span>
@@ -1590,11 +1590,15 @@ export default function Home() {
                     </div>
                     <div className="rounded border border-white/[0.06] bg-[#03060c] p-2">
                       <span className="text-[9px] text-slate-500 block">TIME TO FIRST TOKEN</span>
-                      <strong className="text-amber-300">{liveTtftMs ? `${liveTtftMs}ms` : "Prefill Phase"}</strong>
+                      <strong className="text-amber-300">
+                        {liveTtftMs ? `${liveTtftMs}ms` : (isExecuting ? "Prefill Phase..." : "--")}
+                      </strong>
                     </div>
                     <div className="rounded border border-white/[0.06] bg-[#03060c] p-2">
-                      <span className="text-[9px] text-slate-500 block">ACCELERATOR KERNEL</span>
-                      <strong className="text-slate-300">TensorRT-LLM (FP16)</strong>
+                      <span className="text-[9px] text-slate-500 block">DECODE SPEED</span>
+                      <strong className="text-emerald-300">
+                        {liveThroughput ? `${liveThroughput} tok/s` : (isExecuting ? "Streaming..." : "--")}
+                      </strong>
                     </div>
                   </div>
                 </div>
@@ -1621,9 +1625,9 @@ export default function Home() {
     mode,
     model: selectedModel,
     total_spans: liveNodes.length,
-    root_span: liveNodes[0]?.spanId,
+    root_span: liveNodes[0]?.spanId || "span-root-0",
     duration_ms: liveDurationMs,
-    w3c_traceparent: `00-${(activeTraceId || "").replace(/-/g, "").padEnd(32, "0")}-0000000000000001-01`,
+    w3c_traceparent: `00-${(activeTraceId || "").replace(/-/g, "").padEnd(32, "0")}-${(liveNodes[0]?.spanId || "span000000000001").replace(/-/g, "").slice(0, 16).padEnd(16, "0")}-01`,
     provenance: "ACTUAL_NVIDIA_NIM_TRACING",
   },
   null,
@@ -1754,11 +1758,9 @@ export default function Home() {
           )}
 
           {/* VIEW MODE 2: TOPOLOGICAL EXECUTION GRAPH */}
-          {(primaryView === "GRAPH" || primaryView === "SPLIT") && (
+          {primaryView === "GRAPH" && (
             <div
-              className={`relative flex flex-1 flex-col overflow-hidden bg-[#03060c] cursor-grab active:cursor-grabbing select-none ${
-                primaryView === "SPLIT" ? "h-1/2" : "h-full"
-              }`}
+              className="relative flex flex-1 flex-col overflow-hidden bg-[#03060c] cursor-grab active:cursor-grabbing select-none h-full w-full"
               onMouseDown={handleMouseDownCanvas}
               onMouseMove={handleMouseMoveCanvas}
               onMouseUp={handleMouseUpCanvas}
@@ -1907,59 +1909,59 @@ export default function Home() {
           {/* VIEW MODE 3: TRACE WATERFALL TIMELINE */}
           {primaryView === "WATERFALL" && (
             <div className="h-full w-full overflow-y-auto p-6 font-mono text-xs">
-              <div className="rounded-xl border border-white/[0.08] bg-[#070d1a] p-4">
-                <div className="flex items-center justify-between border-b border-white/[0.08] pb-3 mb-4">
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-100">Distributed Trace Timeline</h3>
-                    <p className="text-[11px] text-slate-400">Span start offsets, concurrency, and hierarchy</p>
-                  </div>
-                  <div className="text-right text-[11px]">
-                    <span className="text-slate-400">Total Duration: </span>
-                    <strong className="text-cyan-300 font-bold">{liveDurationMs}ms</strong>
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  {liveNodes.map((node, idx) => {
-                    const startOffsetPct = Math.min(85, idx * 14);
-                    const widthPct = Math.max(10, Math.min(90 - startOffsetPct, (node.durationMs / Math.max(liveDurationMs, 50)) * 80));
-
-                    return (
-                      <div
-                        key={node.id}
-                        onClick={() => setSelectedNodeId(node.id)}
-                        className={`group flex items-center gap-3 rounded-lg p-2 transition cursor-pointer ${
-                          selectedNode?.id === node.id ? "bg-cyan-500/10 border border-cyan-400/30" : "hover:bg-white/[0.03]"
-                        }`}
-                      >
-                        <div className="w-48 truncate text-[11px]">
-                          <span className="text-cyan-400 mr-2 font-bold">{node.type.toUpperCase()}</span>
-                          <span className="text-slate-200">{node.label}</span>
-                        </div>
-
-                        <div className="relative flex-1 h-6 rounded bg-[#03060c] overflow-hidden">
-                          <div
-                            style={{ left: `${startOffsetPct}%`, width: `${widthPct}%` }}
-                            className={`absolute inset-y-0 rounded transition-all duration-300 ${
-                              node.status === "completed"
-                                ? "bg-gradient-to-r from-emerald-500/60 to-emerald-400/80"
-                                : node.status === "running"
-                                ? "bg-cyan-500/80 animate-pulse"
-                                : "bg-slate-700"
-                            }`}
-                          ></div>
-                        </div>
-
-                        <div className="w-16 text-right text-[11px] font-bold text-slate-300">
-                          {node.durationMs}ms
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
+        <div className="rounded-xl border border-white/[0.08] bg-[#070d1a] p-4">
+          <div className="flex items-center justify-between border-b border-white/[0.08] pb-3 mb-4">
+            <div>
+              <h3 className="text-sm font-bold text-slate-100">Distributed Trace Timeline</h3>
+              <p className="text-[11px] text-slate-400">Span start offsets, concurrency, and hierarchy</p>
             </div>
-          )}
+            <div className="text-right text-[11px]">
+              <span className="text-slate-400">Total Duration: </span>
+              <strong className="text-cyan-300 font-bold">{liveDurationMs}ms</strong>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            {liveNodes.map((node, idx) => {
+              const startOffsetPct = Math.min(85, idx * 14);
+              const widthPct = Math.max(10, Math.min(90 - startOffsetPct, (node.durationMs / Math.max(liveDurationMs, 50)) * 80));
+
+              return (
+                <div
+                  key={node.id}
+                  onClick={() => setSelectedNodeId(node.id)}
+                  className={`group flex items-center gap-3 rounded-lg p-2 transition cursor-pointer ${
+                    selectedNode?.id === node.id ? "bg-cyan-500/10 border border-cyan-400/30" : "hover:bg-white/[0.03]"
+                  }`}
+                >
+                  <div className="w-48 truncate text-[11px]">
+                    <span className="text-cyan-400 mr-2 font-bold">{node.type.toUpperCase()}</span>
+                    <span className="text-slate-200">{node.label}</span>
+                  </div>
+
+                  <div className="relative flex-1 h-6 rounded bg-[#03060c] overflow-hidden">
+                    <div
+                      style={{ left: `${startOffsetPct}%`, width: `${widthPct}%` }}
+                      className={`absolute inset-y-0 rounded transition-all duration-300 ${
+                        node.status === "completed"
+                          ? "bg-gradient-to-r from-emerald-500/60 to-emerald-400/80"
+                          : node.status === "running"
+                          ? "bg-cyan-500/80 animate-pulse"
+                          : "bg-slate-700"
+                      }`}
+                    ></div>
+                  </div>
+
+                  <div className="w-16 text-right text-[11px] font-bold text-slate-300">
+                    {node.durationMs}ms
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    )}
         </section>
 
         {/* ============================================================= */}
