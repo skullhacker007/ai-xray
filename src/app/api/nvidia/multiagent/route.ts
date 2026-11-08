@@ -16,8 +16,8 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400 });
   }
 
-  const prompt = body.prompt?.trim() || "Design an ultra-low latency event streaming architecture for AI inference.";
-  const model = body.model?.trim() || "nvidia/nemotron-3.5-bolt-e4b";
+  const prompt = (body.prompt?.trim() || "Design an ultra-low latency event streaming architecture for AI inference.").slice(0, 32000);
+  const model = (body.model?.trim() || "nvidia/nemotron-3.5-bolt-e4b").slice(0, 120);
   const traceId = `trace-multiagent-${crypto.randomUUID().slice(0, 10)}`;
   const startTime = performance.now();
 
@@ -25,7 +25,11 @@ export async function POST(req: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (event: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        } catch {
+          // Client disconnected
+        }
       };
 
       try {
@@ -38,6 +42,8 @@ export async function POST(req: NextRequest) {
           agents: ["Planner Agent", "Specialist Agent", "Critic & Synthesizer"],
         });
 
+        const agentSignal = AbortSignal.any([req.signal, AbortSignal.timeout(28000)]);
+
         // -------------------------------------------------------------
         // AGENT 1: PLANNER
         // -------------------------------------------------------------
@@ -46,7 +52,7 @@ export async function POST(req: NextRequest) {
         const resPlanner = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${cleanKey}`, "Content-Type": "application/json" },
-          signal: AbortSignal.timeout(18000),
+          signal: agentSignal,
           body: JSON.stringify({
             model,
             messages: [
@@ -63,7 +69,8 @@ export async function POST(req: NextRequest) {
         });
 
         if (!resPlanner.ok) {
-          emit({ type: "error", error: "Planner agent execution failed" });
+          const errText = await resPlanner.text();
+          emit({ type: "error", error: `Planner agent failed (${resPlanner.status}): ${errText}` });
           controller.close();
           return;
         }
@@ -95,7 +102,7 @@ export async function POST(req: NextRequest) {
         const resSpecialist = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${cleanKey}`, "Content-Type": "application/json" },
-          signal: AbortSignal.timeout(18000),
+          signal: agentSignal,
           body: JSON.stringify({
             model,
             messages: [
@@ -112,7 +119,8 @@ export async function POST(req: NextRequest) {
         });
 
         if (!resSpecialist.ok) {
-          emit({ type: "error", error: "Specialist agent execution failed" });
+          const errText = await resSpecialist.text();
+          emit({ type: "error", error: `Specialist agent failed (${resSpecialist.status}): ${errText}` });
           controller.close();
           return;
         }
@@ -144,7 +152,7 @@ export async function POST(req: NextRequest) {
         const resCritic = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${cleanKey}`, "Content-Type": "application/json" },
-          signal: AbortSignal.timeout(18000),
+          signal: agentSignal,
           body: JSON.stringify({
             model,
             messages: [
@@ -164,7 +172,8 @@ export async function POST(req: NextRequest) {
         });
 
         if (!resCritic.ok) {
-          emit({ type: "error", error: "Critic agent execution failed" });
+          const errText = await resCritic.text();
+          emit({ type: "error", error: `Critic agent failed (${resCritic.status}): ${errText}` });
           controller.close();
           return;
         }

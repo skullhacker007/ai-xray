@@ -33,6 +33,7 @@ export async function GET() {
         Authorization: `Bearer ${cleanKey}`,
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(15000),
       // Cache for 60 seconds
       next: { revalidate: 60 },
     });

@@ -16,16 +16,20 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400 });
   }
 
-  const prompt = body.prompt?.trim() || "State 3 key advantages of flash attention in transformer inference.";
-  const modelA = body.modelA?.trim() || "nvidia/nemotron-3.5-bolt-e4b";
-  const modelB = body.modelB?.trim() || "poolside/laguna-xs-2.1";
+  const prompt = (body.prompt?.trim() || "State 3 key advantages of flash attention in transformer inference.").slice(0, 32000);
+  const modelA = (body.modelA?.trim() || "nvidia/nemotron-3.5-bolt-e4b").slice(0, 120);
+  const modelB = (body.modelB?.trim() || "poolside/laguna-xs-2.1").slice(0, 120);
   const traceId = `trace-compare-${crypto.randomUUID().slice(0, 10)}`;
 
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (event: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        } catch {
+          // Client disconnected
+        }
       };
 
       try {
@@ -39,6 +43,9 @@ export async function POST(req: NextRequest) {
           timestamp: new Date().toISOString(),
         });
 
+        const compareSignal = AbortSignal.any([req.signal, AbortSignal.timeout(25000)]);
+        const inTokensApprox = tokenizeString(prompt).length + 15;
+
         // Run both models in parallel
         const startA = performance.now();
         const startB = performance.now();
@@ -46,7 +53,7 @@ export async function POST(req: NextRequest) {
         const pA = fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${cleanKey}`, "Content-Type": "application/json" },
-          signal: AbortSignal.timeout(18000),
+          signal: compareSignal,
           body: JSON.stringify({
             model: modelA,
             messages: [
@@ -60,7 +67,14 @@ export async function POST(req: NextRequest) {
           const dur = Math.round(performance.now() - startA);
           if (!res.ok) {
             const err = await res.text();
-            return { success: false, error: err, duration_ms: dur, model: modelA };
+            return {
+              success: false,
+              error: err,
+              duration_ms: dur,
+              model: modelA,
+              content: `[Model A Error (${res.status})]: ${err}`,
+              usage: { prompt_tokens: inTokensApprox, completion_tokens: 0, total_tokens: inTokensApprox },
+            };
           }
           const d = await res.json();
           const msgA = d.choices?.[0]?.message;
@@ -74,12 +88,23 @@ export async function POST(req: NextRequest) {
             content: cA,
             usage: d.usage || { prompt_tokens: inA, completion_tokens: outA, total_tokens: inA + outA },
           };
+        }).catch((err: unknown) => {
+          const dur = Math.round(performance.now() - startA);
+          const errMsg = err instanceof Error ? err.message : "Request failed";
+          return {
+            success: false,
+            error: errMsg,
+            duration_ms: dur,
+            model: modelA,
+            content: `[Model A Connection Error]: ${errMsg}`,
+            usage: { prompt_tokens: inTokensApprox, completion_tokens: 0, total_tokens: inTokensApprox },
+          };
         });
 
         const pB = fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${cleanKey}`, "Content-Type": "application/json" },
-          signal: AbortSignal.timeout(18000),
+          signal: compareSignal,
           body: JSON.stringify({
             model: modelB,
             messages: [
@@ -93,7 +118,14 @@ export async function POST(req: NextRequest) {
           const dur = Math.round(performance.now() - startB);
           if (!res.ok) {
             const err = await res.text();
-            return { success: false, error: err, duration_ms: dur, model: modelB };
+            return {
+              success: false,
+              error: err,
+              duration_ms: dur,
+              model: modelB,
+              content: `[Model B Error (${res.status})]: ${err}`,
+              usage: { prompt_tokens: inTokensApprox, completion_tokens: 0, total_tokens: inTokensApprox },
+            };
           }
           const d = await res.json();
           const msgB = d.choices?.[0]?.message;
@@ -106,6 +138,17 @@ export async function POST(req: NextRequest) {
             duration_ms: dur,
             content: cB,
             usage: d.usage || { prompt_tokens: inB, completion_tokens: outB, total_tokens: inB + outB },
+          };
+        }).catch((err: unknown) => {
+          const dur = Math.round(performance.now() - startB);
+          const errMsg = err instanceof Error ? err.message : "Request failed";
+          return {
+            success: false,
+            error: errMsg,
+            duration_ms: dur,
+            model: modelB,
+            content: `[Model B Connection Error]: ${errMsg}`,
+            usage: { prompt_tokens: inTokensApprox, completion_tokens: 0, total_tokens: inTokensApprox },
           };
         });
 

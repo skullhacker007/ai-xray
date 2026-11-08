@@ -70,11 +70,12 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const prompt = body.prompt?.trim() || "What is neural attention in deep learning?";
-  const model = body.model?.trim() || "nvidia/nemotron-3.5-bolt-e4b";
-  const systemPrompt =
+  const prompt = (body.prompt?.trim() || "What is neural attention in deep learning?").slice(0, 32000);
+  const model = (body.model?.trim() || "nvidia/nemotron-3.5-bolt-e4b").slice(0, 120);
+  const systemPrompt = (
     body.systemPrompt?.trim() ||
-    "You are an AI assistant analyzed by AI X-RAY observability platform. Provide a precise, high-density response in 2-3 sentences.";
+    "You are an AI assistant analyzed by AI X-RAY observability platform. Provide a precise, high-density response in 2-3 sentences."
+  ).slice(0, 16000);
 
   const traceId = `trace-${crypto.randomUUID().slice(0, 12)}`;
   const rootSpanId = `span-root-${crypto.randomUUID().slice(0, 8)}`;
@@ -291,6 +292,7 @@ export async function POST(req: NextRequest) {
         "Content-Type": "application/json",
         Accept: "application/json",
       },
+      signal: AbortSignal.any([req.signal, AbortSignal.timeout(30000)]),
       body: JSON.stringify(requestPayload),
     });
 

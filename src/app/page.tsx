@@ -296,6 +296,9 @@ export default function Home() {
       }
     }
     loadModels();
+    return () => {
+      abortControllerRef.current?.abort();
+    };
   }, []);
 
   // Helper to add live logs
@@ -493,6 +496,7 @@ export default function Home() {
     abortControllerRef.current = controller;
 
     setIsExecuting(true);
+    setIsPlayingReplay(false);
     setErrorMessage(null);
     setLiveOutput("");
     setLiveTokens([]);
@@ -1016,7 +1020,9 @@ export default function Home() {
 
               if (event.type === "compare_done") {
                 const totalDur = Math.max(event.resultA.duration_ms, event.resultB.duration_ms);
-                const compareText = `=== MODEL A (${event.resultA.model}) ===\n${event.resultA.content}\n\n=== MODEL B (${event.resultB.model}) ===\n${event.resultB.content}`;
+                const contentA = event.resultA.content || `[Error: ${event.resultA.error || "Model A failed"}]`;
+                const contentB = event.resultB.content || `[Error: ${event.resultB.error || "Model B failed"}]`;
+                const compareText = `=== MODEL A (${event.resultA.model}) ===\n${contentA}\n\n=== MODEL B (${event.resultB.model}) ===\n${contentB}`;
                 setLiveDurationMs(totalDur);
                 setLiveCompareData({ modelA: event.resultA, modelB: event.resultB });
                 setLiveOutput(compareText);
@@ -1176,7 +1182,8 @@ export default function Home() {
   // Filter visible nodes by replay percentage
   const visibleNodesCount = Math.max(1, Math.ceil((liveNodes.length * replayStep) / 100));
   const activeNodes = liveNodes.slice(0, visibleNodesCount);
-  const selectedNode: SpatialNode | undefined = liveNodes.find((n) => n.id === selectedNodeId) || liveNodes[0];
+  const selectedNode: SpatialNode | undefined =
+    activeNodes.find((n) => n.id === selectedNodeId) || activeNodes[activeNodes.length - 1] || liveNodes[0];
 
   // Replay slice of tokens and output
   const replayTokensCount = Math.max(0, Math.ceil((liveTokens.length * replayStep) / 100));
@@ -1894,10 +1901,28 @@ export default function Home() {
 
           <div className="flex flex-col gap-2.5">
             {liveNodes.map((node, idx) => {
-              const totalTimelineDur = Math.max(liveDurationMs, liveNodes.reduce((sum, n) => sum + (n.durationMs || 0), 0), 1);
-              const cumulativePrevDur = liveNodes.slice(0, idx).reduce((sum, n) => sum + (n.durationMs || 0), 0);
-              const startOffsetPct = Math.min(88, (cumulativePrevDur / totalTimelineDur) * 90);
-              const widthPct = Math.max(6, Math.min(100 - startOffsetPct, ((node.durationMs || 1) / totalTimelineDur) * 90));
+              const isIdle = liveDurationMs === 0 && node.status === "idle";
+              const totalTimelineDur = Math.max(liveDurationMs, 1);
+
+              // Calculate start offsets honoring concurrency (e.g. Model A & B run in parallel)
+              let startMs = 0;
+              if (mode === "compare") {
+                const inDur = liveNodes.find((n) => n.id === "node-in")?.durationMs || 0;
+                const modelADur = liveNodes.find((n) => n.id === "node-modelA")?.durationMs || 0;
+                const modelBDur = liveNodes.find((n) => n.id === "node-modelB")?.durationMs || 0;
+                const compDur = liveNodes.find((n) => n.id === "node-comp")?.durationMs || 0;
+                if (node.id === "node-in") startMs = 0;
+                else if (node.id === "node-modelA" || node.id === "node-modelB") startMs = inDur;
+                else if (node.id === "node-comp") startMs = inDur + Math.max(modelADur, modelBDur);
+                else if (node.id === "node-out") startMs = inDur + Math.max(modelADur, modelBDur) + compDur;
+                else startMs = liveNodes.slice(0, idx).reduce((sum, n) => sum + (n.durationMs || 0), 0);
+              } else {
+                startMs = liveNodes.slice(0, idx).reduce((sum, n) => sum + (n.durationMs || 0), 0);
+              }
+
+              const startOffsetPct = isIdle ? 0 : Math.min(90, (startMs / totalTimelineDur) * 90);
+              const nodeDur = node.durationMs || 0;
+              const widthPct = isIdle ? 0 : Math.max(4, Math.min(100 - startOffsetPct, (nodeDur / totalTimelineDur) * 90));
 
               return (
                 <div
@@ -1928,22 +1953,28 @@ export default function Home() {
                   </div>
 
                   <div className="relative flex-1 h-6 rounded bg-[#03060c] overflow-hidden">
-                    <div
-                      style={{ left: `${startOffsetPct}%`, width: `${widthPct}%` }}
-                      className={`absolute inset-y-0 rounded transition-all duration-300 ${
-                        node.status === "completed"
-                          ? "bg-gradient-to-r from-emerald-500/80 to-emerald-400/90 shadow-[0_0_8px_rgba(16,185,129,0.4)]"
-                          : node.status === "running"
-                          ? "bg-amber-400 animate-pulse shadow-[0_0_12px_rgba(251,191,36,0.85)]"
-                          : node.status === "failed"
-                          ? "bg-rose-500/80"
-                          : "bg-slate-700/60"
-                      }`}
-                    ></div>
+                    {!isIdle && widthPct > 0 ? (
+                      <div
+                        style={{ left: `${startOffsetPct}%`, width: `${widthPct}%` }}
+                        className={`absolute inset-y-0 rounded transition-all duration-300 ${
+                          node.status === "completed"
+                            ? "bg-gradient-to-r from-emerald-500/80 to-emerald-400/90 shadow-[0_0_8px_rgba(16,185,129,0.4)]"
+                            : node.status === "running"
+                            ? "bg-amber-400 animate-pulse shadow-[0_0_12px_rgba(251,191,36,0.85)]"
+                            : node.status === "failed"
+                            ? "bg-rose-500/80"
+                            : "bg-slate-700/60"
+                        }`}
+                      />
+                    ) : (
+                      <div className="h-full w-full flex items-center px-3 text-[10px] text-slate-600 font-mono italic">
+                        Standby • Awaiting execution
+                      </div>
+                    )}
                   </div>
 
                   <div className="w-16 text-right text-xs font-bold text-slate-200">
-                    {node.durationMs}ms
+                    {isIdle ? "0ms" : `${node.durationMs}ms`}
                   </div>
                 </div>
               );

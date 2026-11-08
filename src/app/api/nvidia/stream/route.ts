@@ -24,13 +24,14 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const prompt = body.prompt?.trim() || "Explain artificial intelligence in 2 sentences.";
-  const model = body.model?.trim() || "nvidia/nemotron-3.5-bolt-e4b";
-  const systemPrompt =
+  const prompt = (body.prompt?.trim() || "Explain artificial intelligence in 2 sentences.").slice(0, 32000);
+  const model = (body.model?.trim() || "nvidia/nemotron-3.5-bolt-e4b").slice(0, 120);
+  const systemPrompt = (
     body.systemPrompt?.trim() ||
-    "You are an AI inspected by AI X-RAY neural instrumentation. Provide a clear, precise response.";
-  const temperature = typeof body.temperature === "number" ? body.temperature : 0.2;
-  const maxTokens = typeof body.maxTokens === "number" ? body.maxTokens : 256;
+    "You are an AI inspected by AI X-RAY neural instrumentation. Provide a clear, precise response."
+  ).slice(0, 16000);
+  const temperature = Math.max(0.0, Math.min(2.0, typeof body.temperature === "number" && !isNaN(body.temperature) ? body.temperature : 0.2));
+  const maxTokens = Math.max(1, Math.min(4096, typeof body.maxTokens === "number" && !isNaN(body.maxTokens) ? body.maxTokens : 256));
 
   const traceId = `trace-${crypto.randomUUID().slice(0, 10)}`;
   const rootSpanId = `span-root-${crypto.randomUUID().slice(0, 8)}`;
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
   const rawBytes = Array.from(Buffer.from(prompt, "utf8"));
 
   try {
+    const upstreamSignal = AbortSignal.any([req.signal, AbortSignal.timeout(30000)]);
     const nvRes = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -52,7 +54,7 @@ export async function POST(req: NextRequest) {
         "Content-Type": "application/json",
         Accept: "application/json",
       },
-      signal: AbortSignal.timeout(20000),
+      signal: upstreamSignal,
       body: JSON.stringify({
         model,
         messages: [

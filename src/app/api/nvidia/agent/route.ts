@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
 import { tokenizeString } from "../../../lib/tokenizer";
+import { evaluateSafeMath } from "../../../lib/safe-math";
 
 // Supported dynamic tools
 const TOOLS = [
@@ -61,13 +62,20 @@ const TOOLS = [
 function executeTool(name: string, args: Record<string, unknown>): { result: unknown; success: boolean } {
   try {
     if (name === "calculator") {
-      const expr = String(args.expression || "0").replace(/[^0-9+\-*/().%^ ]/g, "");
-      const val = Function(`'use strict'; return (${expr})`)();
-      return { result: { expression: expr, calculated_value: val, precision: "64-bit IEEE 754 float" }, success: true };
+      const rawExpr = String(args.expression || "0");
+      const val = evaluateSafeMath(rawExpr);
+      return {
+        result: {
+          expression: rawExpr,
+          calculated_value: val,
+          precision: "64-bit IEEE 754 float",
+        },
+        success: true,
+      };
     }
     if (name === "get_weather") {
-      const city = String(args.city || "Unknown");
-      const hash = city.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0);
+      const city = String(args.city || "Unknown").slice(0, 80);
+      const hash = Math.abs(city.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0));
       const tempC = 14 + (hash % 16);
       const condition = ["Clear Sky", "Partly Cloudy", "Light Rain", "Sunny"][hash % 4];
       return {
@@ -120,8 +128,8 @@ export async function POST(req: NextRequest) {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400 });
   }
 
-  const prompt = body.prompt?.trim() || "What is 348 * 29?";
-  const model = body.model?.trim() || "nvidia/nemotron-3.5-bolt-e4b";
+  const prompt = (body.prompt?.trim() || "What is 348 * 29?").slice(0, 16000);
+  const model = (body.model?.trim() || "nvidia/nemotron-3.5-bolt-e4b").slice(0, 120);
   const traceId = `trace-agent-${crypto.randomUUID().slice(0, 10)}`;
   const startTime = performance.now();
 
@@ -129,7 +137,11 @@ export async function POST(req: NextRequest) {
   const stream = new ReadableStream({
     async start(controller) {
       const emit = (event: Record<string, unknown>) => {
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        } catch {
+          // Stream already closed or client disconnected
+        }
       };
 
       try {
@@ -153,6 +165,7 @@ export async function POST(req: NextRequest) {
           { role: "user", content: prompt },
         ];
 
+        const turn1Signal = AbortSignal.any([req.signal, AbortSignal.timeout(25000)]);
         const turn1Start = performance.now();
         const res1 = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
@@ -160,7 +173,7 @@ export async function POST(req: NextRequest) {
             Authorization: `Bearer ${cleanKey}`,
             "Content-Type": "application/json",
           },
-          signal: AbortSignal.timeout(18000),
+          signal: turn1Signal,
           body: JSON.stringify({
             model,
             messages: turn1Messages,
@@ -175,7 +188,7 @@ export async function POST(req: NextRequest) {
 
         if (!res1.ok) {
           const errText = await res1.text();
-          emit({ type: "error", error: `NVIDIA API Turn 1 Error: ${errText}` });
+          emit({ type: "error", error: `NVIDIA API Turn 1 Error (${res1.status}): ${errText}` });
           controller.close();
           return;
         }
@@ -246,7 +259,11 @@ export async function POST(req: NextRequest) {
         // TURN 2: Send tool results back to NVIDIA NIM for final synthesis
         const turn2Messages = [
           ...turn1Messages,
-          message1,
+          {
+            role: "assistant",
+            content: message1?.content || null,
+            tool_calls: message1?.tool_calls,
+          },
           ...executedToolResults.map((tr) => ({
             role: "tool",
             tool_call_id: tr.id,
@@ -254,6 +271,7 @@ export async function POST(req: NextRequest) {
           })),
         ];
 
+        const turn2Signal = AbortSignal.any([req.signal, AbortSignal.timeout(25000)]);
         const turn2Start = performance.now();
         const res2 = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
@@ -261,7 +279,7 @@ export async function POST(req: NextRequest) {
             Authorization: `Bearer ${cleanKey}`,
             "Content-Type": "application/json",
           },
-          signal: AbortSignal.timeout(18000),
+          signal: turn2Signal,
           body: JSON.stringify({
             model,
             messages: turn2Messages,
@@ -274,7 +292,7 @@ export async function POST(req: NextRequest) {
 
         if (!res2.ok) {
           const err2Text = await res2.text();
-          emit({ type: "error", error: `NVIDIA API Turn 2 Error: ${err2Text}` });
+          emit({ type: "error", error: `NVIDIA API Turn 2 Error (${res2.status}): ${err2Text}` });
           controller.close();
           return;
         }
