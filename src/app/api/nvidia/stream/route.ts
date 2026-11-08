@@ -1,6 +1,7 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
 import { tokenizeString, computeAttentionScores } from "../../../lib/tokenizer";
+import { getModelArchitectureSpecs } from "../../../lib/model-specs";
 
 export async function POST(req: NextRequest) {
   const rawKey = process.env.NVIDIA_API_KEY;
@@ -35,6 +36,7 @@ export async function POST(req: NextRequest) {
   const rootSpanId = `span-root-${crypto.randomUUID().slice(0, 8)}`;
   const startTime = performance.now();
   const isoStartTime = new Date().toISOString();
+  const specs = getModelArchitectureSpecs(model);
 
   // Dynamic tokenization & attention matrix from the prompt
   const inputTokens = tokenizeString(prompt);
@@ -50,6 +52,7 @@ export async function POST(req: NextRequest) {
         "Content-Type": "application/json",
         Accept: "application/json",
       },
+      signal: AbortSignal.timeout(20000),
       body: JSON.stringify({
         model,
         messages: [
@@ -91,10 +94,10 @@ export async function POST(req: NextRequest) {
               system_tokens_count: systemTokens.length,
               prompt_tokens_count: inputTokens.length,
               attention_matrix: attentionMatrix,
-              vocabulary_size: 128256,
-              embedding_dimensions: 4096,
-              num_attention_heads: 32,
-              num_layers: 32,
+              vocabulary_size: specs.vocabSize,
+              embedding_dimensions: specs.hiddenDim,
+              num_attention_heads: specs.qHeads,
+              num_layers: specs.layers,
               timestamp: isoStartTime,
             })}\n\n`
           )
@@ -148,7 +151,7 @@ export async function POST(req: NextRequest) {
                   finishReason = choice.finish_reason;
                 }
 
-                const deltaContent = choice?.delta?.content;
+                const deltaContent = choice?.delta?.content || choice?.delta?.reasoning_content;
                 if (deltaContent) {
                   tokenIndex++;
                   const now = performance.now();
@@ -162,7 +165,8 @@ export async function POST(req: NextRequest) {
                     hash = (hash << 5) - hash + deltaContent.charCodeAt(i);
                     hash |= 0;
                   }
-                  const tokenId = Math.abs(hash % 98000) + 1000;
+                  const vocabMax = Math.max(10000, specs.vocabSize - 1000);
+                  const tokenId = Math.abs(hash % vocabMax) + 1000;
                   const prob = Math.min(0.98, 0.78 + (tokenIndex % 5) * 0.04);
 
                   const topCandidates = [

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
+import { tokenizeString } from "../../../lib/tokenizer";
 
 export async function POST(req: NextRequest) {
   const rawKey = process.env.NVIDIA_API_KEY;
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
         const resPlanner = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${cleanKey}`, "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(18000),
           body: JSON.stringify({
             model,
             messages: [
@@ -67,8 +69,13 @@ export async function POST(req: NextRequest) {
         }
 
         const dataPlanner = await resPlanner.json();
-        const planText = dataPlanner.choices?.[0]?.message?.content || "";
-        const planUsage = dataPlanner.usage || { prompt_tokens: 40, completion_tokens: 50, total_tokens: 90 };
+        const msgPlanner = dataPlanner.choices?.[0]?.message;
+        const planText = msgPlanner?.content || msgPlanner?.reasoning_content || "";
+        const planUsage = dataPlanner.usage || {
+          prompt_tokens: tokenizeString(prompt).length + 25,
+          completion_tokens: tokenizeString(planText).length,
+          total_tokens: tokenizeString(prompt).length + 25 + tokenizeString(planText).length,
+        };
         const p1Duration = Math.round(performance.now() - p1Start);
 
         emit({
@@ -88,6 +95,7 @@ export async function POST(req: NextRequest) {
         const resSpecialist = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${cleanKey}`, "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(18000),
           body: JSON.stringify({
             model,
             messages: [
@@ -110,8 +118,13 @@ export async function POST(req: NextRequest) {
         }
 
         const dataSpecialist = await resSpecialist.json();
-        const specialistText = dataSpecialist.choices?.[0]?.message?.content || "";
-        const specUsage = dataSpecialist.usage || { prompt_tokens: 120, completion_tokens: 80, total_tokens: 200 };
+        const msgSpecialist = dataSpecialist.choices?.[0]?.message;
+        const specialistText = msgSpecialist?.content || msgSpecialist?.reasoning_content || "";
+        const specUsage = dataSpecialist.usage || {
+          prompt_tokens: tokenizeString(prompt + planText).length + 25,
+          completion_tokens: tokenizeString(specialistText).length,
+          total_tokens: tokenizeString(prompt + planText).length + 25 + tokenizeString(specialistText).length,
+        };
         const p2Duration = Math.round(performance.now() - p2Start);
 
         emit({
@@ -131,6 +144,7 @@ export async function POST(req: NextRequest) {
         const resCritic = await fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${cleanKey}`, "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(18000),
           body: JSON.stringify({
             model,
             messages: [
@@ -156,8 +170,13 @@ export async function POST(req: NextRequest) {
         }
 
         const dataCritic = await resCritic.json();
-        const finalReview = dataCritic.choices?.[0]?.message?.content || "";
-        const criticUsage = dataCritic.usage || { prompt_tokens: 180, completion_tokens: 70, total_tokens: 250 };
+        const msgCritic = dataCritic.choices?.[0]?.message;
+        const finalReview = msgCritic?.content || msgCritic?.reasoning_content || "";
+        const criticUsage = dataCritic.usage || {
+          prompt_tokens: tokenizeString(prompt + specialistText).length + 25,
+          completion_tokens: tokenizeString(finalReview).length,
+          total_tokens: tokenizeString(prompt + specialistText).length + 25 + tokenizeString(finalReview).length,
+        };
         const p3Duration = Math.round(performance.now() - p3Start);
 
         emit({

@@ -1,5 +1,6 @@
 import { NextRequest } from "next/server";
 import crypto from "crypto";
+import { tokenizeString } from "../../../lib/tokenizer";
 
 export async function POST(req: NextRequest) {
   const rawKey = process.env.NVIDIA_API_KEY;
@@ -17,7 +18,7 @@ export async function POST(req: NextRequest) {
 
   const prompt = body.prompt?.trim() || "State 3 key advantages of flash attention in transformer inference.";
   const modelA = body.modelA?.trim() || "nvidia/nemotron-3.5-bolt-e4b";
-  const modelB = body.modelB?.trim() || "nvidia/nemotron-3.5-lightning-30b-a3b";
+  const modelB = body.modelB?.trim() || "poolside/laguna-xs-2.1";
   const traceId = `trace-compare-${crypto.randomUUID().slice(0, 10)}`;
 
   const encoder = new TextEncoder();
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest) {
         const pA = fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${cleanKey}`, "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(18000),
           body: JSON.stringify({
             model: modelA,
             messages: [
@@ -61,18 +63,23 @@ export async function POST(req: NextRequest) {
             return { success: false, error: err, duration_ms: dur, model: modelA };
           }
           const d = await res.json();
+          const msgA = d.choices?.[0]?.message;
+          const cA = msgA?.content || msgA?.reasoning_content || "";
+          const inA = tokenizeString(prompt).length + 15;
+          const outA = tokenizeString(cA).length;
           return {
             success: true,
             model: modelA,
             duration_ms: dur,
-            content: d.choices?.[0]?.message?.content || "",
-            usage: d.usage || { prompt_tokens: 30, completion_tokens: 60, total_tokens: 90 },
+            content: cA,
+            usage: d.usage || { prompt_tokens: inA, completion_tokens: outA, total_tokens: inA + outA },
           };
         });
 
         const pB = fetch("https://integrate.api.nvidia.com/v1/chat/completions", {
           method: "POST",
           headers: { Authorization: `Bearer ${cleanKey}`, "Content-Type": "application/json" },
+          signal: AbortSignal.timeout(18000),
           body: JSON.stringify({
             model: modelB,
             messages: [
@@ -89,12 +96,16 @@ export async function POST(req: NextRequest) {
             return { success: false, error: err, duration_ms: dur, model: modelB };
           }
           const d = await res.json();
+          const msgB = d.choices?.[0]?.message;
+          const cB = msgB?.content || msgB?.reasoning_content || "";
+          const inB = tokenizeString(prompt).length + 15;
+          const outB = tokenizeString(cB).length;
           return {
             success: true,
             model: modelB,
             duration_ms: dur,
-            content: d.choices?.[0]?.message?.content || "",
-            usage: d.usage || { prompt_tokens: 30, completion_tokens: 60, total_tokens: 90 },
+            content: cB,
+            usage: d.usage || { prompt_tokens: inB, completion_tokens: outB, total_tokens: inB + outB },
           };
         });
 

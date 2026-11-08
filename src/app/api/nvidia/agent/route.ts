@@ -160,6 +160,7 @@ export async function POST(req: NextRequest) {
             Authorization: `Bearer ${cleanKey}`,
             "Content-Type": "application/json",
           },
+          signal: AbortSignal.timeout(18000),
           body: JSON.stringify({
             model,
             messages: turn1Messages,
@@ -194,7 +195,7 @@ export async function POST(req: NextRequest) {
 
         if (toolCalls.length === 0) {
           // Direct response without tools
-          const directOutput = message1?.content || "No output";
+          const directOutput = message1?.content || message1?.reasoning_content || "No output";
           emit({
             type: "final_output",
             content: directOutput,
@@ -260,6 +261,7 @@ export async function POST(req: NextRequest) {
             Authorization: `Bearer ${cleanKey}`,
             "Content-Type": "application/json",
           },
+          signal: AbortSignal.timeout(18000),
           body: JSON.stringify({
             model,
             messages: turn2Messages,
@@ -278,7 +280,8 @@ export async function POST(req: NextRequest) {
         }
 
         const data2 = await res2.json();
-        const finalContent = data2.choices?.[0]?.message?.content || "";
+        const msg2 = data2.choices?.[0]?.message;
+        const finalContent = msg2?.content || msg2?.reasoning_content || "";
         const turn2Usage = data2.usage || { prompt_tokens: 120, completion_tokens: 45, total_tokens: 165 };
 
         const totalTokens = (turn1Usage.total_tokens || 0) + (turn2Usage.total_tokens || 0);

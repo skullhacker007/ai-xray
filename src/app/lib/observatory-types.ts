@@ -10,7 +10,8 @@ export type ExecutionStatus =
   | "failed"
   | "retrying"
   | "cancelled"
-  | "skipped";
+  | "skipped"
+  | "idle";
 
 export type NodeType =
   | "input"
