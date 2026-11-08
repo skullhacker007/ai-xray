@@ -22,7 +22,7 @@ export default function DeepNeuralNetworkVisualizer({
   durationMs,
   currentEmittedToken,
 }: DeepNeuralNetworkVisualizerProps) {
-  const [selectedLayerId, setSelectedLayerId] = useState<string>("hidden-1");
+  const [selectedLayerId, setSelectedLayerId] = useState<string>("input-layer");
   const [hoveredNode, setHoveredNode] = useState<string | null>(null);
   const uniqueId = useId().replace(/:/g, "");
 

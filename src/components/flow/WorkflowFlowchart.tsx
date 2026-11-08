@@ -643,6 +643,56 @@ export default function WorkflowFlowchart({
   // COMPACT HORIZONTAL FLOWCHART DOCKED ABOVE TOPOLOGY GRAPH
   // =========================================================================
   if (compact) {
+    const renderCompactStepCard = (step: WorkflowStep, idx: number) => {
+      const isSelected = activeStepId === step.id || getMappedNodeId(step.id, mode) === activeStepId;
+      const isReplayInactive =
+        replayStep !== undefined &&
+        replayStep < 100 &&
+        idx >= Math.max(1, Math.ceil((steps.length * replayStep) / 100));
+
+      return (
+        <div
+          onClick={() => handleStepClick(step.id)}
+          className={`group relative flex items-center gap-2.5 rounded-lg border px-3 py-1.5 text-xs transition cursor-pointer select-none w-full min-w-0 ${
+            isReplayInactive ? "opacity-35" : ""
+          } ${getColorClasses(
+            isReplayInactive ? "idle" : step.status,
+            isSelected
+          )}`}
+          title={`${step.title}: ${step.simpleExplanation}`}
+        >
+          <span className="text-base shrink-0">{step.icon}</span>
+          <div className="text-left font-mono min-w-0 flex-1">
+            <div className="flex items-center gap-1.5 truncate">
+              <span className="text-xs font-bold text-slate-400 shrink-0">{step.stepNumber}</span>
+              <span
+                className={`h-2 w-2 rounded-full shrink-0 ${
+                  isReplayInactive
+                    ? "bg-slate-600"
+                    : step.status === "running"
+                    ? "bg-amber-400 animate-ping"
+                    : step.status === "completed"
+                    ? "bg-emerald-400"
+                    : "bg-slate-500"
+                }`}
+              />
+              <span className="font-bold text-slate-100 text-xs group-hover:text-cyan-300 transition truncate">
+                {step.title}
+              </span>
+            </div>
+            <div className="text-xs text-slate-300 flex items-center gap-2 mt-0.5 truncate">
+              <span className="text-cyan-300 font-semibold truncate max-w-[150px]">
+                {step.metricValue || step.layer}
+              </span>
+              {step.durationMs !== undefined && !isReplayInactive && (
+                <span className="text-slate-400 shrink-0">({step.durationMs}ms)</span>
+              )}
+            </div>
+          </div>
+        </div>
+      );
+    };
+
     return (
       <div className="w-full border-b border-white/[0.08] bg-[#050914]/95 px-4 py-3 backdrop-blur-md">
         <div className="flex flex-wrap items-center justify-between mb-2.5 gap-2">
@@ -672,64 +722,87 @@ export default function WorkflowFlowchart({
           </div>
         </div>
 
-        {/* Responsive Connected Horizontal Flow Strip */}
-        <div className="overflow-x-auto pb-1 scrollbar-thin">
-          <div className="flex items-center gap-2 min-w-max py-0.5">
-            {steps.map((step, idx) => {
-              const isSelected = activeStepId === step.id || getMappedNodeId(step.id, mode) === activeStepId;
-              const isReplayInactive =
-                replayStep !== undefined &&
-                replayStep < 100 &&
-                idx >= Math.max(1, Math.ceil((steps.length * replayStep) / 100));
-
-              return (
-                <React.Fragment key={step.id}>
-                  <div
-                    onClick={() => handleStepClick(step.id)}
-                    className={`group relative flex items-center gap-2.5 rounded-lg border px-3 py-1.5 text-xs transition cursor-pointer select-none shrink-0 ${
-                      isReplayInactive ? "opacity-35" : ""
-                    } ${getColorClasses(
-                      isReplayInactive ? "idle" : step.status,
-                      isSelected
-                    )}`}
-                    title={`${step.title}: ${step.simpleExplanation}`}
-                  >
-                    <span className="text-base shrink-0">{step.icon}</span>
-                    <div className="text-left font-mono min-w-0">
-                      <div className="flex items-center gap-1.5 truncate">
-                        <span className="text-xs font-bold text-slate-400 shrink-0">{step.stepNumber}</span>
-                        <span
-                          className={`h-2 w-2 rounded-full shrink-0 ${
-                            isReplayInactive
-                              ? "bg-slate-600"
-                              : step.status === "running"
-                              ? "bg-amber-400 animate-ping"
-                              : step.status === "completed"
-                              ? "bg-emerald-400"
-                              : "bg-slate-500"
-                          }`}
-                        />
-                        <span className="font-bold text-slate-100 text-xs group-hover:text-cyan-300 transition truncate max-w-[190px]">
-                          {step.title}
-                        </span>
-                      </div>
-                      <div className="text-xs text-slate-300 flex items-center gap-2 mt-0.5 truncate">
-                        <span className="text-cyan-300 font-semibold truncate max-w-[150px]">
-                          {step.metricValue || step.layer}
-                        </span>
-                        {step.durationMs !== undefined && !isReplayInactive && (
-                          <span className="text-slate-400 shrink-0">({step.durationMs}ms)</span>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {idx < steps.length - 1 && (
-                    <span className="text-slate-500 font-bold text-xs select-none shrink-0 px-0.5">→</span>
+        {/* 4-Blocks-Per-Layer Connected Serpentine Flow Strip */}
+        <div className="overflow-x-auto pb-0.5 scrollbar-thin">
+          <div className="min-w-[840px] space-y-1">
+            {/* Layer 1: Stages 01 -> 02 -> 03 -> 04 (4 blocks max) */}
+            <div className="grid grid-cols-4 gap-3 items-center">
+              {steps.slice(0, 4).map((step, idx) => (
+                <div key={step.id} className="flex items-center gap-2 min-w-0">
+                  <div className="flex-1 min-w-0">{renderCompactStepCard(step, idx)}</div>
+                  {idx < 3 && idx < steps.length - 1 && (
+                    <span className="text-slate-500 font-bold text-xs select-none shrink-0">→</span>
                   )}
-                </React.Fragment>
-              );
-            })}
+                </div>
+              ))}
+            </div>
+
+            {/* Connect Bend Arrow in between Stage 04 and Stage 05 (Column 4) */}
+            {steps.length > 4 && (
+              <div className="grid grid-cols-4 gap-3">
+                <div className="col-span-3"></div>
+                <div className="flex justify-center items-center py-0.5">
+                  <span className="text-cyan-400 font-black text-sm select-none animate-pulse">
+                    ↓
+                  </span>
+                </div>
+              </div>
+            )}
+
+            {/* Layer 2: Stages in reverse order (e.g. 6 <- 5 or 7 <- 6 <- 5) (4 blocks max) */}
+            {steps.length > 4 && (
+              <div className="grid grid-cols-4 gap-3 items-center">
+                {/* Column 1: Output Destination Marker when 7 steps */}
+                {steps.length >= 7 ? (
+                  <div className="flex items-center justify-end pr-2">
+                    <span className="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1.5 select-none">
+                      <span>🏁</span>
+                      <span>Output</span>
+                    </span>
+                  </div>
+                ) : (
+                  <div></div>
+                )}
+
+                {/* Column 2: Stage 07 if 7 steps; Output marker if 6 steps; empty if 5 steps */}
+                {steps.length >= 7 ? (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-slate-500 font-bold text-xs select-none shrink-0">←</span>
+                    <div className="flex-1 min-w-0">{renderCompactStepCard(steps[6], 6)}</div>
+                  </div>
+                ) : steps.length === 6 ? (
+                  <div className="flex items-center justify-end pr-2">
+                    <span className="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1.5 select-none">
+                      <span>🏁</span>
+                      <span>Output</span>
+                    </span>
+                  </div>
+                ) : (
+                  <div></div>
+                )}
+
+                {/* Column 3: Stage 06 if >= 6 steps; Output marker if 5 steps */}
+                {steps.length >= 6 ? (
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-slate-500 font-bold text-xs select-none shrink-0">←</span>
+                    <div className="flex-1 min-w-0">{renderCompactStepCard(steps[5], 5)}</div>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-end pr-2">
+                    <span className="text-xs font-mono font-bold text-emerald-400 flex items-center gap-1.5 select-none">
+                      <span>🏁</span>
+                      <span>Output</span>
+                    </span>
+                  </div>
+                )}
+
+                {/* Column 4: Stage 05 (Directly beneath Stage 04, with single left arrow) */}
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className="text-slate-500 font-bold text-xs select-none shrink-0">←</span>
+                  <div className="flex-1 min-w-0">{renderCompactStepCard(steps[4], 4)}</div>
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>
